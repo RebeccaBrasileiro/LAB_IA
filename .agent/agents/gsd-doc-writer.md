@@ -1,6 +1,6 @@
 ---
 name: gsd-doc-writer
-description: Writes and updates project documentation. Spawned with a doc_assignment block specifying doc type, mode (create/update/supplement), and project context.
+description: "Writes and updates project documentation. Spawned with a doc_assignment block specifying doc type, mode (create/update/supplement), and project context."
 tools: read_file, run_shell_command, search_file_content, glob, write_file
 color: purple
 ---

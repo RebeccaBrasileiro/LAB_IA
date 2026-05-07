@@ -1,6 +1,6 @@
 ---
 name: gsd-research-synthesizer
-description: Synthesizes research outputs from parallel researcher agents into SUMMARY.md. Spawned by /gsd-new-project after 4 researcher agents complete.
+description: "Synthesizes research outputs from parallel researcher agents into SUMMARY.md. Spawned by /gsd-new-project after 4 researcher agents complete."
 tools: read_file, write_file, run_shell_command
 color: purple
 ---
@@ -134,7 +134,7 @@ Write to `.planning/research/SUMMARY.md`
 The 4 parallel researcher agents write files but do NOT commit. You commit everything together.
 
 ```bash
-gsd-sdk query commit "docs: complete project research" .planning/research/
+gsd-sdk query commit "docs: complete project research" --files .planning/research/
 ```
 
 ## Step 8: Return Summary

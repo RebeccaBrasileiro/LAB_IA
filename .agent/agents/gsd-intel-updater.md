@@ -1,6 +1,6 @@
 ---
 name: gsd-intel-updater
-description: Analyzes codebase and writes structured intel files to .planning/intel/.
+description: "Analyzes codebase and writes structured intel files to .planning/intel/."
 tools: read_file, write_file, run_shell_command, glob, search_file_content
 color: cyan
 ---
