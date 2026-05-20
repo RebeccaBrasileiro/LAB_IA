@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 import docx
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,7 +10,9 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # ==========================================
 # 1. Extração de Dados
 # ==========================================
-doc = docx.Document(r'c:\Users\Breno\LAB_IA\RBF2\context\RBF2.docx')
+script_dir = os.path.dirname(os.path.abspath(__file__))
+docx_path = os.path.join(script_dir, 'context', 'RBF2.docx')
+doc = docx.Document(docx_path)
 table_test = doc.tables[2]
 table_train = doc.tables[3]
 

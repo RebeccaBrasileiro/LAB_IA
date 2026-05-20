@@ -77,7 +77,7 @@ Para cada uma das topologias apresentadas, identificamos o melhor treinamento (a
 
 Abaixo estão traçados, de modo não superposto numa mesma imagem, os gráficos do EQM em função de cada época para esses três melhores modelos.
 
-![Gráficos EQM vs Épocas](file:///c:/Users/Breno/LAB_IA/RBF2/graficos_mse.png)
+![Gráficos EQM vs Épocas](./graficos_mse.png)
 
 ---
 

@@ -48,8 +48,8 @@ def create_dataset(series, p, start_t, end_t):
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-def train_mlp(X, D, N_INPUT, N_HIDDEN, N_OUTPUT=1, eta=0.1, alpha=0.8, target_mse=0.5e-6, max_epochs=50000):
-    np.random.seed() # garante aleatoriedade a cada nova chamada
+def train_mlp(X, D, N_INPUT, N_HIDDEN, N_OUTPUT=1, eta=0.1, alpha=0.8, target_mse=0.5e-6, max_epochs=50000, seed=42):
+    np.random.seed(seed) # garante reprodutibilidade de pesos iniciais
     W1 = np.random.rand(N_HIDDEN, N_INPUT + 1)
     W2 = np.random.rand(N_OUTPUT, N_HIDDEN + 1)
     
@@ -83,8 +83,9 @@ def train_mlp(X, D, N_INPUT, N_HIDDEN, N_OUTPUT=1, eta=0.1, alpha=0.8, target_ms
         delta2 = E * Y2 * (1 - Y2)
         delta1 = np.dot(delta2, W2[:, 1:]) * Y1 * (1 - Y1)
         
-        grad_W2 = np.dot(delta2.T, Y1_biased)
-        grad_W1 = np.dot(delta1.T, X_biased)
+        # Normalização dos gradientes pelo tamanho do lote N
+        grad_W2 = np.dot(delta2.T, Y1_biased) / N
+        grad_W1 = np.dot(delta1.T, X_biased) / N
         
         dW2 = eta * grad_W2 + alpha * dW2_prev
         dW1 = eta * grad_W1 + alpha * dW1_prev
@@ -97,13 +98,31 @@ def train_mlp(X, D, N_INPUT, N_HIDDEN, N_OUTPUT=1, eta=0.1, alpha=0.8, target_ms
             
     return W1, W2, mse_history, epoch + 1
 
-def predict(X, W1, W2):
-    N = X.shape[0]
-    X_biased = np.hstack([np.full((N, 1), -1), X])
-    Y1 = sigmoid(np.dot(X_biased, W1.T))
-    Y1_biased = np.hstack([np.full((N, 1), -1), Y1])
-    Y2 = sigmoid(np.dot(Y1_biased, W2.T))
-    return Y2.flatten()
+def predict_recursive(series, W1, W2, p, start_t, end_t):
+    preds = []
+    pred_dict = {}
+    for t in range(start_t, end_t + 1):
+        x = []
+        for k in range(1, p + 1):
+            t_prev = t - k
+            if t_prev >= start_t:
+                # Usa o valor que a própria rede previu no passado
+                val = pred_dict[t_prev]
+            else:
+                # Usa o valor real histórico
+                val = series[t_prev - 1]
+            x.append(val)
+        
+        # Predição com W1 e W2
+        x_biased = np.hstack([[-1], x])
+        Y1 = sigmoid(np.dot(x_biased, W1.T))
+        Y1_biased = np.hstack([[-1], Y1])
+        Y2 = sigmoid(np.dot(Y1_biased, W2.T))
+        pred_val = Y2[0]
+        
+        pred_dict[t] = pred_val
+        preds.append(pred_val)
+    return np.array(preds)
 
 configs = [
     {"name": "Rede 1", "p": 5, "N1": 10},
@@ -130,9 +149,12 @@ for cfg in configs:
     
     for i in range(3):
         print(f"  Rodada {i+1}/3")
-        W1, W2, mse_history, epochs = train_mlp(X_train, Y_train, N_INPUT=p, N_HIDDEN=N1, max_epochs=50000)
+        # Define semente consistente para cada uma das rodadas
+        seed = 42 + i * 100 + p * 10
+        W1, W2, mse_history, epochs = train_mlp(X_train, Y_train, N_INPUT=p, N_HIDDEN=N1, max_epochs=50000, seed=seed)
         
-        preds = predict(X_test, W1, W2)
+        # Previsão recursiva / closed-loop no conjunto de teste (t=101..120)
+        preds = predict_recursive(series, W1, W2, p, 101, 120)
         rel_errors = np.abs(Y_test - preds) / np.abs(Y_test)
         mean_rel_error = np.mean(rel_errors)
         var_rel_error = np.var(rel_errors)

@@ -68,12 +68,13 @@ d_train = train_data[:, 4]
 
 X_test = np.hstack((-np.ones((test_data.shape[0], 1)), test_data))
 
-eta = 0.0025
+eta = 0.1
 epsilon = 1e-6
 num_trainings = 5
 
 trainings_results = []
 test_predictions = []
+relative_errors = [] # wait, let's keep name standard
 mse_histories = []
 
 # Define standard weights order: bias, x1, x2, x3, x4
@@ -86,27 +87,18 @@ for t in range(num_trainings):
     mse_history = []
     
     while True:
-        # Calculate MSE before updating weights for the epoch
-        mse_epoch = 0
-        for i in range(X_train.shape[0]):
-            x = X_train[i]
-            d = d_train[i]
-            v = np.dot(w, x)
-            mse_epoch += (d - v)**2
-        mse_epoch /= X_train.shape[0]
+        # Vectorized predictions and error
+        v = np.dot(X_train, w)
+        e = d_train - v
+        mse_epoch = np.mean(e**2)
         mse_history.append(mse_epoch)
         
         # Stop condition
         if epoch > 0 and abs(mse_history[-1] - mse_history[-2]) < epsilon:
             break
             
-        # Update weights
-        for i in range(X_train.shape[0]):
-            x = X_train[i]
-            d = d_train[i]
-            v = np.dot(w, x)
-            e = d - v
-            w = w + eta * e * x
+        # Vectorized weight update (Batch Gradient Descent)
+        w = w + eta * np.dot(e, X_train) / X_train.shape[0]
             
         epoch += 1
             
@@ -117,12 +109,9 @@ for t in range(num_trainings):
     })
     mse_histories.append(mse_history)
     
-    # Predict
-    preds = []
-    for i in range(X_test.shape[0]):
-        v = np.dot(w, X_test[i])
-        y = 1 if v >= 0 else -1
-        preds.append(y)
+    # Vectorized prediction
+    v_test = np.dot(X_test, w)
+    preds = np.where(v_test >= 0, 1, -1).tolist()
     test_predictions.append(preds)
 
 # Plot for first 2
