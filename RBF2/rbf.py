@@ -1,38 +1,153 @@
-# pyrefly: ignore [missing-import]
-import docx
+"""
+RBF2 — Aproximação de Função com Redes RBF (múltiplas topologias).
+
+Correções aplicadas:
+- Caminhos relativos via os.path (portabilidade)
+- Dados carregados de CSV (sem dependência de python-docx)
+- RNA encapsulada na classe RBFNet com métodos fit() e predict()
+- Treinamento da camada de saída vetorizado via NumPy
+"""
+
+import os
 import numpy as np
 import matplotlib.pyplot as plt
-import os
 
-# Set working directory to script location
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # ==========================================
-# 1. Extração de Dados
+# Classe RBFNet
+# ==========================================
+class RBFNet:
+    """
+    Rede Neural de Base Radial (RBF).
+
+    Camada escondida: centros obtidos via K-means + função Gaussiana.
+    Camada de saída: treinada pela Regra Delta (vetorizada).
+    """
+
+    def __init__(self, n_centers, eta=0.01, epsilon=1e-7,
+                 max_epochs=5000, seed=42):
+        self.n_centers = n_centers
+        self.eta = eta
+        self.epsilon = epsilon
+        self.max_epochs = max_epochs
+        self.seed = seed
+
+        self.centers = None
+        self.variances = None
+        self.weights = None
+        self.mse_history = []
+        self.epochs = 0
+
+    # ---------- Funções auxiliares ----------
+
+    @staticmethod
+    def _gaussian_rbf(X, centers, variances):
+        """Calcula a matriz de ativação da camada escondida (Gaussiana)."""
+        dists_sq = np.array([np.sum((X - c) ** 2, axis=1) for c in centers]).T
+        return np.exp(-dists_sq / (2 * variances))
+
+    def _kmeans(self, X):
+        """K-means para encontrar centros e variâncias dos clusters."""
+        np.random.seed(self.seed)
+        indices = np.random.choice(X.shape[0], self.n_centers, replace=False)
+        centers = X[indices].copy()
+        labels = np.zeros(X.shape[0])
+
+        for _ in range(200):
+            dists = np.array([np.sum((X - c) ** 2, axis=1) for c in centers]).T
+            new_labels = np.argmin(dists, axis=1)
+
+            if np.all(labels == new_labels):
+                break
+            labels = new_labels
+
+            for i in range(self.n_centers):
+                mask = labels == i
+                if np.sum(mask) > 0:
+                    centers[i] = np.mean(X[mask], axis=0)
+
+        variances = np.zeros(self.n_centers)
+        for i in range(self.n_centers):
+            cluster_pts = X[labels == i]
+            if len(cluster_pts) > 0:
+                variances[i] = np.mean(np.sum((cluster_pts - centers[i]) ** 2, axis=1))
+            if variances[i] == 0:
+                variances[i] = 1e-6
+
+        return centers, variances
+
+    # ---------- Métodos principais ----------
+
+    def fit(self, X, d, X_kmeans=None):
+        """
+        Treina a rede RBF.
+
+        Parâmetros
+        ----------
+        X : ndarray (n_samples, n_features) – entrada
+        d : ndarray (n_samples,) – saída desejada
+        X_kmeans : ndarray, opcional – subconjunto para K-means
+        """
+        if X_kmeans is None:
+            X_kmeans = X
+
+        # 1. Camada escondida — K-means
+        self.centers, self.variances = self._kmeans(X_kmeans)
+
+        # 2. Ativações RBF + bias
+        Phi = self._gaussian_rbf(X, self.centers, self.variances)
+        Phi_bias = np.hstack((-np.ones((Phi.shape[0], 1)), Phi))
+
+        # 3. Camada de saída — Regra Delta vetorizada
+        np.random.seed(self.seed)
+        self.weights = np.random.rand(self.n_centers + 1)
+
+        prev_mse = float('inf')
+        self.mse_history = []
+        self.epochs = 0
+
+        while True:
+            v = Phi_bias @ self.weights
+            e = d - v
+            mse = np.mean(e ** 2)
+            self.mse_history.append(mse)
+
+            if abs(prev_mse - mse) < self.epsilon:
+                break
+            prev_mse = mse
+
+            # Atualização vetorizada: w += eta * Phi^T @ e / N
+            self.weights += self.eta * (Phi_bias.T @ e) / len(d)
+
+            self.epochs += 1
+            if self.epochs > self.max_epochs:
+                break
+
+    def predict(self, X):
+        """Retorna saídas contínuas da rede."""
+        Phi = self._gaussian_rbf(X, self.centers, self.variances)
+        Phi_bias = np.hstack((-np.ones((Phi.shape[0], 1)), Phi))
+        return Phi_bias @ self.weights
+
+    def predict_class(self, X, threshold=0.0):
+        """Classifica: 1 se y >= threshold, -1 caso contrário."""
+        y = self.predict(X)
+        return np.where(y >= threshold, 1, -1)
+
+
+# ==========================================
+# 1. Carregamento de Dados (CSV)
 # ==========================================
 script_dir = os.path.dirname(os.path.abspath(__file__))
-docx_path = os.path.join(script_dir, 'context', 'RBF2.docx')
-doc = docx.Document(docx_path)
-table_test = doc.tables[2]
-table_train = doc.tables[3]
 
-train_data = []
-# Skip header
-for row in table_train.rows[1:]:
-    cells = [c.text.strip().replace(',', '.') for c in row.cells]
-    for i in range(3):
-        idx = i*5
-        if cells[idx] == '': continue
-        train_data.append([float(cells[idx+1]), float(cells[idx+2]), float(cells[idx+3]), float(cells[idx+4])])
-
-test_data = []
-# Rows 2 to 16 (15 samples)
-for row in table_test.rows[2:17]:
-    cells = [c.text.strip().replace(',', '.') for c in row.cells]
-    test_data.append([float(cells[1]), float(cells[2]), float(cells[3]), float(cells[4])])
-
-train_data = np.array(train_data)
-test_data = np.array(test_data)
+train_data = np.loadtxt(
+    os.path.join(script_dir, 'train.csv'),
+    delimiter=',', skiprows=1
+)
+test_data = np.loadtxt(
+    os.path.join(script_dir, 'test.csv'),
+    delimiter=',', skiprows=1
+)
 
 X_train = train_data[:, :3]
 d_train = train_data[:, 3]
@@ -41,48 +156,7 @@ X_test = test_data[:, :3]
 d_test = test_data[:, 3]
 
 # ==========================================
-# Funções Auxiliares
-# ==========================================
-def kmeans(X, k, seed):
-    np.random.seed(seed)
-    indices = np.random.choice(X.shape[0], k, replace=False)
-    centers = X[indices].copy()
-    labels = np.zeros(X.shape[0])
-    
-    for _ in range(200):
-        dists = np.zeros((X.shape[0], k))
-        for i in range(k):
-            dists[:, i] = np.sum((X - centers[i])**2, axis=1)
-        new_labels = np.argmin(dists, axis=1)
-        
-        if np.all(labels == new_labels):
-            break
-        labels = new_labels
-        
-        for i in range(k):
-            if np.sum(labels == i) > 0:
-                centers[i] = np.mean(X[labels == i], axis=0)
-                
-    variances = np.zeros(k)
-    for i in range(k):
-        cluster_points = X[labels == i]
-        if len(cluster_points) > 0:
-            dists_sq = np.sum((cluster_points - centers[i])**2, axis=1)
-            variances[i] = np.mean(dists_sq)
-        if variances[i] == 0:
-            variances[i] = 1e-6
-            
-    return centers, variances
-
-def gaussian_rbf(X, centers, variances):
-    phi = np.zeros((X.shape[0], len(centers)))
-    for i in range(len(centers)):
-        dists_sq = np.sum((X - centers[i])**2, axis=1)
-        phi[:, i] = np.exp(-dists_sq / (2 * variances[i]))
-    return phi
-
-# ==========================================
-# Execução
+# 2. Execução — Múltiplas Topologias
 # ==========================================
 topologies = [5, 10, 15]
 results = {}
@@ -90,106 +164,75 @@ results = {}
 plt.figure(figsize=(15, 5))
 
 for idx_top, N1 in enumerate(topologies):
-    print(f"\n--- Rede {idx_top+1} (N1={N1}) ---")
+    print(f"\n--- Rede {idx_top + 1} (N1={N1}) ---")
     results[N1] = []
-    
+
     best_mse = float('inf')
     best_mse_history = []
     best_t = -1
-    
+
     for t in range(3):
-        seed = 42 + t*10 + N1
-        
-        # 1. K-Means
-        centers, variances = kmeans(X_train, N1, seed)
-        
-        # 2. RBF
-        Phi_train = gaussian_rbf(X_train, centers, variances)
-        Phi_train_bias = np.hstack((-np.ones((Phi_train.shape[0], 1)), Phi_train))
-        
-        Phi_test = gaussian_rbf(X_test, centers, variances)
-        Phi_test_bias = np.hstack((-np.ones((Phi_test.shape[0], 1)), Phi_test))
-        
-        # 3. Adaline / Delta Rule
-        eta = 0.01
-        epsilon = 1e-7
-        np.random.seed(seed)
-        w = np.random.rand(N1 + 1) # values between 0 and 1
-        
-        epoch = 0
-        prev_mse = float('inf')
-        mse_history = []
-        
-        while True:
-            # Predictions
-            v = np.dot(Phi_train_bias, w)
-            e = d_train - v
-            mse = np.mean(e**2)
-            mse_history.append(mse)
-            
-            if abs(prev_mse - mse) < epsilon:
-                break
-            prev_mse = mse
-            
-            # Batch update (or stochastic? standard delta rule is batch or stochastic. Adaline is usually batch or stochastic. Let's do stochastic since it's common, or batch. "A regra delta generalizada" often means stochastic. Wait, in RBF1 we did stochastic. Let's do stochastic to match RBF1).
-            for i in range(Phi_train_bias.shape[0]):
-                v_i = np.dot(w, Phi_train_bias[i])
-                e_i = d_train[i] - v_i
-                w += eta * e_i * Phi_train_bias[i]
-                
-            epoch += 1
-            if epoch > 5000: # safety break
-                break
-                
-        # Calculate Final Train MSE using final weights
-        v = np.dot(Phi_train_bias, w)
-        final_mse = np.mean((d_train - v)**2)
-        
-        # Validate
-        v_test = np.dot(Phi_test_bias, w)
+        seed = 42 + t * 10 + N1
+
+        # Treinar rede
+        net = RBFNet(n_centers=N1, eta=0.01, epsilon=1e-7,
+                     max_epochs=5000, seed=seed)
+        net.fit(X_train, d_train)
+
+        # MSE final de treino
+        v_train = net.predict(X_train)
+        final_mse = np.mean((d_train - v_train) ** 2)
+
+        # Validação
+        v_test = net.predict(X_test)
         relative_errors = np.abs(v_test - d_test) / np.abs(d_test) * 100
         mre = np.mean(relative_errors)
-        var_mre = np.var(relative_errors) # variance in % squared. usually just standard variance of the relative errors.
-        
-        print(f" Treinamento {t+1}: Épocas={epoch}, EQM={final_mse:.6f}, MRE={mre:.2f}%, Var={var_mre:.2f}%")
-        
+        var_mre = np.var(relative_errors)
+
+        print(f" Treinamento {t + 1}: Épocas={net.epochs}, "
+              f"EQM={final_mse:.6f}, MRE={mre:.2f}%, Var={var_mre:.2f}%")
+
         results[N1].append({
-            'epochs': epoch,
+            'epochs': net.epochs,
             'mse': final_mse,
             'mre': mre,
             'var_mre': var_mre,
             'y_test': v_test,
-            'mse_history': mse_history
+            'mse_history': net.mse_history
         })
-        
-        # Track best
+
+        # Rastrear melhor treinamento
         if final_mse < best_mse:
             best_mse = final_mse
-            best_mse_history = mse_history
+            best_mse_history = net.mse_history
             best_t = t
-            
-    # Plot best
-    plt.subplot(1, 3, idx_top+1)
+
+    # Plotar melhor treinamento
+    plt.subplot(1, 3, idx_top + 1)
     plt.plot(best_mse_history, color='blue')
-    plt.title(f'Rede {idx_top+1} (N1={N1})\nMelhor Treinamento: T{best_t+1}')
+    plt.title(f'Rede {idx_top + 1} (N1={N1})\nMelhor Treinamento: T{best_t + 1}')
     plt.xlabel('Épocas')
     plt.ylabel('EQM')
     plt.grid(True)
 
 plt.tight_layout()
-plt.savefig('graficos_mse.png')
-print("\nGráficos salvos em graficos_mse.png")
+output_path = os.path.join(script_dir, 'graficos_mse.png')
+plt.savefig(output_path)
+print(f"\nGráficos salvos em {output_path}")
 
-# Print output formatting for markdown
+# ==========================================
+# 3. Resultados para Markdown
+# ==========================================
 print("\n--- RESULTADOS PARA MARKDOWN ---")
 for idx, N1 in enumerate(topologies):
-    print(f"Rede {idx+1} (N1={N1})")
+    print(f"Rede {idx + 1} (N1={N1})")
     for t in range(3):
         res = results[N1][t]
-        print(f"T{t+1}: EQM={res['mse']:.6f}, Epocas={res['epochs']}")
-        
-for i in range(15):
-    row_str = f"| {i+1} | {X_test[i][0]} | {X_test[i][1]} | {X_test[i][2]} | {d_test[i]} |"
+        print(f"T{t + 1}: EQM={res['mse']:.6f}, Epocas={res['epochs']}")
+
+for i in range(len(X_test)):
+    row_str = (f"| {i + 1} | {X_test[i][0]} | {X_test[i][1]} | "
+               f"{X_test[i][2]} | {d_test[i]} |")
     for N1 in topologies:
         for t in range(3):
             y_pred = results[N1][t]['y_test'][i]
@@ -201,4 +244,4 @@ for N1 in topologies:
     print(f"N1={N1}:")
     for t in range(3):
         res = results[N1][t]
-        print(f"  T{t+1}: MRE={res['mre']:.2f}%, Var={res['var_mre']:.2f}%")
+        print(f"  T{t + 1}: MRE={res['mre']:.2f}%, Var={res['var_mre']:.2f}%")
